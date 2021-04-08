@@ -47,6 +47,9 @@ private:
   //! 维诺图
   void calcVornoiField(const std::vector<Vec2d>& points, std::vector<Vec2d>& gradient, double& cost);
 
+  //! 曲率
+  void calcCurvature(const std::vector<Vec2d>& points, std::vector<Vec2d>& gradient, double& cost);
+
   //! 离点最近的障碍物点及相应距离
   //! 若xi在地图外，最近点为其本身，距离为0
   void nearestObsDistance(const Vec2d& xi, Vec2d& oi, double& dist);
@@ -60,6 +63,8 @@ private:
 
   //! 离散转连续
   void indexToCoord(const Vec2i& index, Vec2d& coord);
+
+  bool Vec2dIsnNan(const Vec2d& vec);
 
 private:
   /* data */
@@ -111,6 +116,11 @@ private:
 
   Vec2d first_point_;
   Vec2d last_point_;
+
+  int algorithm_;
+
+  double max_x_, max_y_;
+  double min_x_, min_y_;
 };
 
 #endif

@@ -2,7 +2,7 @@
 
 NLoptSmoother::NLoptSmoother(std::string name, int size_x, int size_y)
 {
-  //   ros::NodeHandle private_nh("~/" + name);
+  // ros::NodeHandle private_nh("~/" + name);
   ros::NodeHandle private_nh("~");
 
   private_nh.param<int>("max_iterations", max_iterations_, 200);
@@ -12,9 +12,11 @@ NLoptSmoother::NLoptSmoother(std::string name, int size_x, int size_y)
   private_nh.param<float>("max_vor_obs_distance", vorObsDMax_, 2.0);
   private_nh.param<float>("weight_obstacle", wObstacle_, 0.2);
   private_nh.param<float>("weight_voronoi", wVoronoi_, 0.2);
-  private_nh.param<float>("weight_curvature", wCurvature_, 0.0);
+  private_nh.param<float>("weight_curvature", wCurvature_, 0.2);
   private_nh.param<float>("weight_smoothness", wSmoothness_, 0.6);
+  private_nh.param<int>("algorithm", algorithm_, 11);
   ROS_INFO("max_iterations: %d", max_iterations_);
+  ROS_INFO("algorithm: %d", algorithm_);
   ROS_INFO("max_obs_distance: %lf", obsDMax_);
   ROS_INFO("max_vor_obs_distance: %lf", vorObsDMax_);
   ROS_INFO("weight_obstacle: %lf", wObstacle_);
@@ -125,8 +127,9 @@ std::vector<geometry_msgs::Pose2D> NLoptSmoother::getSmoothedPath()
 void NLoptSmoother::smoothPath()
 {
   min_cost_ = std::numeric_limits<double>::max();
+  iter_nums_ = 0;
 
-  nlopt::opt opt(nlopt::algorithm(11), points_num_ * 2);
+  nlopt::opt opt(nlopt::algorithm(algorithm_), points_num_ * 2);
   opt.set_min_objective(NLoptSmoother::costFunction, this);
   opt.set_maxeval(max_iterations_);
 
@@ -256,6 +259,69 @@ void NLoptSmoother::calcVornoiField(const std::vector<Vec2d>& points, std::vecto
   }
 }
 
+void NLoptSmoother::calcCurvature(const std::vector<Vec2d>& points, std::vector<Vec2d>& gradient, double& cost)
+{
+  cost = 0.0;
+  std::fill(gradient.begin(), gradient.end(), Vec2d(.0, .0));
+
+  Vec2d xi, xim1, xip1;
+  Vec2d Dxi, Dxip1;
+
+  Vec2d v(1.0, 1.0);
+
+  for (int i = 1; i < points_num_ - 1; ++i)
+  {
+    xim1 = points[i - 1];
+    xi = points[i + 0];
+    xip1 = points[i + 1];
+
+    Dxi = xi - xim1;
+    Dxip1 = xip1 - xi;
+
+    double absDxi = Dxi.Length();
+    double absDxip1 = Dxip1.Length();
+
+    if (absDxi > 1e-6 && absDxip1 > 1e-6)
+    {
+      double Dphi = std::acos(std::min(std::max(Dxi.InnerProd(Dxip1) / (absDxi * absDxip1), -1.0), 1.0));
+      double kappa = Dphi / absDxi;
+
+      if (kappa > kappaMax_)
+      {
+        double absDxiInv = 1.0 / absDxi;
+        double PDphi_PcosDphi = -1.0 / std::sqrt(1 - std::pow(std::cos(Dphi), 2));
+        double u = Dphi / Dxi.LengthSquare();
+
+        // ROS_INFO("absDxiInv: %lf, PDphi_PcosDphi: %lf, u: %lf", absDxiInv, PDphi_PcosDphi, u);
+
+        if (xi.Length() > 1e-6 && xip1.Length() > 1e-6)
+        {
+          Vec2d p1 = xi.ort(-xip1) / (absDxi * absDxip1);
+          Vec2d p2 = -xip1.ort(xi) / (absDxi * absDxip1);
+
+          Vec2d PcosDphi_Pxi = -p1 - p2;
+          Vec2d PcosDphi_Pxim1 = p2;
+          Vec2d PcosDphi_Pxip1 = p1;
+
+          Vec2d Pki_Pxi = (-1.0) * absDxiInv * PDphi_PcosDphi * PcosDphi_Pxi - u * v;
+          Vec2d Pki_Pxim1 = (-1.0) * absDxiInv * PDphi_PcosDphi * PcosDphi_Pxim1 - u * (-v);
+          Vec2d Pki_Pxip1 = (-1.0) * absDxiInv * PDphi_PcosDphi * PcosDphi_Pxip1;
+
+          if (Vec2dIsnNan(Pki_Pxi) || Vec2dIsnNan(Pki_Pxim1) || Vec2dIsnNan(Pki_Pxip1))
+            continue;
+
+          double dot = 2.0 * (kappa - kappaMax_);
+
+          gradient[i + 0] += dot * Pki_Pxi;
+          gradient[i - 1] += dot * Pki_Pxim1;
+          gradient[i + 1] += dot * Pki_Pxip1;
+          cost += std::pow(kappa - kappaMax_, 2);
+        }
+      }
+    }
+  }
+}
+
 void NLoptSmoother::combineCost(const std::vector<double>& points, std::vector<double>& grad, double& f_commbin)
 {
   //! points转换为vec2D
@@ -266,7 +332,7 @@ void NLoptSmoother::combineCost(const std::vector<double>& points, std::vector<d
   //! 第一个点
   q.push_back(first_point_);
 
-  for (int i = 1; i < points_num_ - 1; ++i)
+  for (int i = 1; i < points_num_; ++i)
   {
     p.set_x(points[2 * i + 0]);
     p.set_y(points[2 * i + 1]);
@@ -274,31 +340,36 @@ void NLoptSmoother::combineCost(const std::vector<double>& points, std::vector<d
   }
 
   //！ 最后一个点
-  q.push_back(last_point_);
+  // q.push_back(last_point_);
 
   /* ---------- evaluate cost and gradient ---------- */
   //! cost
-  double f_smoothness, f_distance, f_vornoi;
+  double f_smoothness, f_distance, f_vornoi, f_curvature;
 
   //! gradient
-  std::vector<Vec2d> g_smoothness, g_distance, g_vornoi;
+  std::vector<Vec2d> g_smoothness, g_distance, g_vornoi, g_curvature;
+
   g_smoothness.resize(points_num_);
   g_distance.resize(points_num_);
   g_vornoi.resize(points_num_);
+  g_curvature.resize(points_num_);
 
   calcSmoothness(q, g_smoothness, f_smoothness);
   calcObsDistance(q, g_distance, f_distance);
   calcVornoiField(q, g_vornoi, f_vornoi);
+  calcCurvature(q, g_curvature, f_curvature);
 
   /* ---------- convert to NLopt format...---------- */
   grad.resize(points_num_);
 
-  f_commbin = wSmoothness_ * f_smoothness + wObstacle_ * f_distance + wVoronoi_ * f_vornoi;
+  f_commbin = wSmoothness_ * f_smoothness + wObstacle_ * f_distance + wVoronoi_ * f_vornoi + wCurvature_ * f_curvature;
 
   for (int i = 0; i < points_num_; ++i)
   {
-    grad[2 * i + 0] = wSmoothness_ * g_smoothness[i].x() + wObstacle_ * g_distance[i].x() + wVoronoi_ * g_vornoi[i].x();
-    grad[2 * i + 1] = wSmoothness_ * g_smoothness[i].y() + wObstacle_ * g_distance[i].y() + wVoronoi_ * g_vornoi[i].y();
+    grad[2 * i + 0] = wSmoothness_ * g_smoothness[i].x() + wObstacle_ * g_distance[i].x() +
+                      wVoronoi_ * g_vornoi[i].x() + wCurvature_ * g_curvature[i].x();
+    grad[2 * i + 1] = wSmoothness_ * g_smoothness[i].y() + wObstacle_ * g_distance[i].y() +
+                      wVoronoi_ * g_vornoi[i].y() + wCurvature_ * g_curvature[i].y();
   }
   iter_nums_ += 1;
 }
@@ -310,7 +381,7 @@ double NLoptSmoother::costFunction(const std::vector<double>& points, std::vecto
 
   opt->combineCost(points, grad, cost);
 
-  //! 存储最好的点与最小的带价值
+  //! 存储最好的点与最小的代价值
   if (cost < opt->min_cost_)
   {
     opt->min_cost_ = cost;
@@ -386,4 +457,13 @@ bool NLoptSmoother::isOnGrid(Vec2d vec)
 {
   Vec2i index;
   return coordToIndex(vec, index);
+}
+
+bool NLoptSmoother::Vec2dIsnNan(const Vec2d& vec)
+{
+  if (std::isnan(vec.x()) || std::isnan(vec.y()))
+  {
+    return true;
+  }
+  return false;
 }
