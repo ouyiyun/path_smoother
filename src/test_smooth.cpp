@@ -1,4 +1,5 @@
 #include <path_smoother/path_smoother.h>
+#include <path_smoother/nlopt_smoother.h>
 
 #include <ros/ros.h>
 #include <nav_msgs/Path.h>
@@ -69,14 +70,18 @@ int main(int argc, char** argv)
     ros::spinOnce();
   }
 
-  // PathSmoother ps("test_smooth", width, height);
-  boost::shared_ptr<PathSmoother> ps = boost::shared_ptr<PathSmoother>(new PathSmoother("smooth_node", width, height));
+  // boost::shared_ptr<PathSmoother> ps = boost::shared_ptr<PathSmoother>(new PathSmoother("smooth_node", width,
+  // height)); ps->updateMap(map); ps->setOriginalPath(origin_path); ps->smoothPath(); smoothed_path =
+  // ps->getSmoothedPath();
 
-  ps->updateMap(map);
-  ps->setOriginalPath(origin_path);
-  ps->smoothPath();
+  boost::shared_ptr<NLoptSmoother> nlopt_ps =
+      boost::shared_ptr<NLoptSmoother>(new NLoptSmoother("smooth_node", width, height));
 
-  smoothed_path = ps->getSmoothedPath();
+  nlopt_ps->updateMap(map);
+  nlopt_ps->setOriginalPath(origin_path);
+  nlopt_ps->smoothPath();
+  smoothed_path = nlopt_ps->getSmoothedPath();
+
   path_pub(smoothed_path_pub, smoothed_path);
 
   ros::Duration(10.0).sleep();

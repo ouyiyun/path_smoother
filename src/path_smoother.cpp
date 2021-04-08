@@ -356,6 +356,7 @@ Vec2d PathSmoother::voronoiTerm(Vec2d xi)
   //! 最近边
   double edgDst = 0.0;
   Vec2i closest_edge_pt_index = voronoi_.GetClosestVoronoiEdgePoint(xi_index, edgDst);
+  edgDst *= resolution_;
   Vec2d closest_edge_pt;
   indexToCoord(closest_edge_pt_index, closest_edge_pt);
   Vec2d edgVct(xi.x() - closest_edge_pt.x(), xi.y() - closest_edge_pt.y());

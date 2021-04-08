@@ -5,12 +5,13 @@
     <node pkg="path_smoother" type="smooth_node" name="smooth_node" output="screen">
         <param name="max_iterations" value="200"/>
         <param name="min_turning_radius" value="4.0"/>
-        <param name="max_obs_distance" value="1.2"/>
+        <param name="max_obs_distance" value="1.5"/>
         <param name="max_vor_obs_distance" value="2.0"/>
         <param name="weight_obstacle" value="0.2"/>
-        <param name="weight_voronoi" value="0.4"/>
-        <param name="weight_curvature" value="0.001"/>
-        <param name="weight_smoothness" value="0.4"/>
+        <param name="weight_voronoi" value="0.2"/>
+        <param name="weight_curvature" value="0.0"/>
+        <param name="weight_smoothness" value="0.6"/>
     </node>
+
     <node name="rviz" pkg="rviz" type="rviz" args="-d $(find path_smoother)/rviz/smooth.rviz" required="true" />
 </launch>
